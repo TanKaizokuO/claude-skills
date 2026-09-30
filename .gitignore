@@ -1,0 +1,22 @@
+# Third-party skills (not mine)
+/heroui-react/
+/impeccable
+/teach
+# claude.ai-synced Anthropic skills
+/synced/
+/.trash/
+
+# Local / agent / OS files
+.venv/
+.env
+.env.*
+!.env.example
+.omp/
+.claude/
+__pycache__/
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Contains local SSH credentials
+/remote-run/

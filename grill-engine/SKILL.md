@@ -1,5 +1,5 @@
 ---
-name: my-grilling
+name: grill-engine
 description: Grill the user relentlessly about a plan, decision, or idea, using the interactive AskUserQuestion tool. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.
 ---
 

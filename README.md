@@ -65,6 +65,10 @@ ln -s ~/.claude/skills/<name> ~/.omp/agent/skills/<name>
 
 If omp already has its own copy of a skill (some have diverged), check before replacing it.
 
+## Credits
+
+`grill-engine`, `converge-with-me`, `converge-with-docs` and `handoff` are inspired by skills in Matt Pocock's [mattpocock/skills](https://github.com/mattpocock/skills). They are adapted to my own workflow, so they differ from the originals.
+
 ## What is not tracked
 
 `.gitignore` leaves out everything that is not authored here:

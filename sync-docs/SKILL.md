@@ -1,10 +1,10 @@
 ---
 name: sync-docs
-description: Update the project's state docs (status, goals, roadmap, plan) to match current progress, with proof for each change. Leaves the commit to /ship.
+description: Update the project's state docs (status, goals, roadmap, plan) to match current progress, with proof for each change. Leaves the commit to /push-to-gh.
 disable-model-invocation: true
 ---
 
-This skill brings each **state doc** in line with the evidence. Every edit fixes one **drift** and carries its **proof**. It edits state docs only and ends by handing the commit to `/ship`.
+This skill brings each **state doc** in line with the evidence. Every edit fixes one **drift** and carries its **proof**. It edits state docs only and ends by handing the commit to `/push-to-gh`.
 
 ## 1. Discover and gather evidence
 
@@ -50,6 +50,6 @@ Fixed dates kept: Nov 2 submission (ADR-0001)
 
 When the user asked for a handoff prompt, print it next: a self-contained prompt that tells a new agent to read the status doc first, then names the top next item and its completion criterion.
 
-End with: `Run /ship to commit.`
+End with: `Run /push-to-gh to commit.`
 
-Done when every edited file has a block, every report line from step 2 is printed, and the last line points to `/ship`.
+Done when every edited file has a block, every report line from step 2 is printed, and the last line points to `/push-to-gh`.

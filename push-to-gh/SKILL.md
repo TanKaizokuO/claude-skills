@@ -1,17 +1,31 @@
 ---
-name: ship
+name: push-to-gh
 description: Fix .gitignore, secret-scan, commit, and push the current repo to GitHub, creating the GitHub repo when there is none.
 ---
 
-Ship the working tree of the current repo to GitHub in one run. Typing `/ship` is the user's standing authorization to commit and push: push without asking, and pause only at the stops named below. Published history stays exactly as it is: plain `git push` and `git pull --rebase` only (no `--force`, no amending or rebasing pushed commits), to the remote already configured.
+Ship the working tree of the current repo to GitHub in one run. Typing `/push-to-gh` is the user's standing authorization to commit and push: push without asking, and pause only at the stops named below. Published history stays exactly as it is: plain `git push` and `git pull --rebase` only (no `--force`, no amending or rebasing pushed commits), to the remote already configured.
 
-Text after `/ship`: `$ARGUMENTS` — a commit-message hint steers step 4; a follow-on task ("then create lesson 14") runs after step 6.
+Text after `/push-to-gh`: `$ARGUMENTS` — a commit-message hint steers step 4; a follow-on task ("then create lesson 14") runs after step 6.
 
 ## 1. Inspect
 
-From the repo root: `git status -sb`, `git remote -v`, `git log --oneline -10`.
+First check whether the current directory is inside a repo: `git rev-parse --show-toplevel`.
 
-- **Not a repo, or no remote** → new-repo path: `git init -b main` (an existing repo on `master` gets `git branch -M main`), then ask once with `AskUserQuestion`: public or private.
+- **Not inside a repo** → look for sub repos before anything else (see below). Never `git init` the current directory while sub repos exist.
+- **Inside a repo** → continue with that repo.
+
+**Sub-repo discovery** (current directory is not a repo). List repos up to three levels down, without descending into a repo once found:
+
+```bash
+find . -maxdepth 3 \( -name node_modules -o -name .venv -o -name .cache \) -prune -o -name .git -print0 | xargs -r -0 -n1 dirname | sort
+```
+
+- **One or more found** → ask once per sub repo with `AskUserQuestion` (up to 4 questions per call; batch the rest in further calls): "Ship `<path>`?" with options Ship / Skip, showing the path relative to the current directory. Then run steps 1–5 for each repo answered Ship, one after another, from that repo's root (`git -C <path>` or `cd` into it), with `$ARGUMENTS` applying to every one. A stop condition in one repo (secret, conflict, nothing to ship) is reported for that repo and does not block the others. All answered Skip → report "nothing selected" and stop.
+- **None found** → treat the current directory as a new repo (new-repo path below).
+
+For each repo being shipped, from its root: `git status -sb`, `git remote -v`, `git log --oneline -10`.
+
+- **No remote (or the new-repo path from an empty discovery)** → new-repo path: `git init -b main` if it is not yet a repo (an existing repo on `master` gets `git branch -M main`), then ask once with `AskUserQuestion`: public or private.
 - **Mid-merge, mid-rebase, or detached HEAD** → stop and report.
 - **Nothing to commit and nothing ahead of upstream** → report "nothing to ship" and stop.
 
@@ -65,4 +79,4 @@ Done when `git status -sb` shows the branch level with its upstream: no `ahead`,
 
 ## 6. Report
 
-One line: `<hash(es)> <branch> → <remote URL>`, followed by any `.gitignore` additions and anything left uncommitted or stopped on. Then run the follow-on task from `$ARGUMENTS`, if any.
+One line per shipped repo: `<hash(es)> <branch> → <remote URL>` (prefix the sub-repo path when more than one repo was in play), followed by any `.gitignore` additions and anything left uncommitted or stopped on, and the sub repos skipped. Then run the follow-on task from `$ARGUMENTS`, if any, once after all repos are done.

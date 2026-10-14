@@ -9,13 +9,13 @@ For the rest of this session you are the **orchestrator**. The main chat carries
 
 Call `AskUserQuestion` with three single-select questions:
 
-- **Orchestrator** (header `Orchestrator`) — options: Opus 5.5, Sonnet 5.5, Fable 5.1, Haiku 4.5.
-- **Worker** (header `Worker`) — options: Sonnet 5.5, Opus 5.5, Haiku 4.5, Fable 5.1.
+- **Orchestrator** (header `Orchestrator`) — options: Haiku 5.5 (Recommended), Opus 5.5, Sonnet 5.5.
+- **Worker** (header `Worker`) — options: Haiku 5.5 (Recommended), Sonnet 5.5, Opus 5.5, Fable 5.1.
 - **Gemini offload** (header `Gemini`) — options: "Read-only tasks (Recommended)", "Read-only + mechanical edits", "Off". See section 3.
 
 `AskUserQuestion` caps options at four, so Opus 5 and Sonnet 5 are not listed; accept them when typed as "Other".
 
-Map the worker answer to the `Agent` tool's `model` value: Opus 5.5 → `opus`, Opus 5 → `opus` (the alias resolves to the current Opus, so Opus 5 cannot be pinned), Sonnet 5.5 → `sonnet`, Sonnet 5 → `sonnet` (same alias caveat), Haiku 4.5 → `haiku`, Fable 5.1 → `fable`. A custom "Other" answer that names none of these: ask once more.
+Map the worker answer to the `Agent` tool's `model` value: Haiku 5.5 → `haiku` with `effort: "high"` (the `haiku` alias resolves to the current Haiku, which is 5.5), Opus 5.5 → `opus`, Opus 5 → `opus` (the alias resolves to the current Opus, so Opus 5 cannot be pinned), Sonnet 5.5 → `sonnet`, Sonnet 5 → `sonnet` (same alias caveat), Fable 5.1 → `fable`. Workers other than Haiku 5.5 take no `effort` value. A custom "Other" answer that names none of these: ask once more.
 
 The orchestrator is the model running this main session — you cannot switch yourself. Compare the answer with your own model:
 
@@ -32,7 +32,7 @@ For each user request:
 
 1. **Plan** — split the request into **bounded** tasks, each with one clear deliverable. Bounded means about 10 files or 30 edits at most. Every worker turn re-reads the worker's whole transcript, so a worker's cost grows much faster than its work: three whole-feature passes of 50–110 edits each once used over half of a week's subagent tokens. A pass over a whole feature, surface, or session diff becomes one worker per file group. Tasks with no dependency between them are dispatched in parallel, in one message.
 2. **Route** — decide per task whether it goes to a Claude worker or a Gemini agent (section 3). Default to Claude when unsure.
-3. **Dispatch** — Gemini tasks go out as in section 3. Claude tasks: one `Agent` call per task with `model` set to the worker value and a `subagent_type` that fits (`Explore` for read-only search, `Plan` for design, `general-purpose` otherwise). Workers start cold, so each prompt is self-contained:
+3. **Dispatch** — Gemini tasks go out as in section 3. Claude tasks: one `Agent` call per task with `model` set to the worker value (plus `effort: "high"` for Haiku 5.5) and a `subagent_type` that fits (`Explore` for read-only search, `Plan` for design, `general-purpose` otherwise). Workers start cold, so each prompt is self-contained:
    - the goal and why it matters;
    - every fact from this conversation the worker needs — paths, decisions, constraints;
    - the exact files in scope. When several workers copy one pattern (a reference commit, a skill's guidance), work it out once and paste the steps into each prompt;

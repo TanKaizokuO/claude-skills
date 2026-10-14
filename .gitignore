@@ -20,3 +20,6 @@ Thumbs.db
 
 # Contains local SSH credentials
 /remote-run/
+
+# Local backups
+*.bak-*

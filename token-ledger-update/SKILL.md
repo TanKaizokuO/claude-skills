@@ -21,9 +21,12 @@ The artifact is the `dashboard_template.html` UI from `~/Code/projects/token-tra
 5. **Merge and splice DATA** with the bundled script (the DATA line is ~150KB; never hand-edit or Read it whole):
    `python3 -I ~/.claude/skills/token-ledger-update/merge_data.py <saved.html> $SCRATCH/data.json $SCRATCH/token-ledger.html`
    - Session logs get pruned (Claude Code `cleanupPeriodDays`, set to 90 on 2026-10-14), so a fresh parse loses old days. For each `(day, source)` where the old artifact has more messages than the fresh payload, the script keeps the old `cells`/`sub_cells`, rebuilds `totals`, `messages`, `span` and every `by_*` from the merged cells, and sets `initial_days: 0`. It prints the restored pairs. Days in the past changing a little (not dropping) is normal; a large unexpected list of restored days means something else broke, so investigate before publishing.
+   - Timezone: days are cut in `DATA.timezone` (Asia/Kolkata since 2026-10-15; absent = legacy UTC). If the artifact's zone differs from the payload's, the script aborts; rerun with a 4th arg, `./tokentrack.py json --tz <artifact zone> > $SCRATCH/data_old_tz.json`. It then adds back only the missing part of each pruned day. Never merge mismatched zones any other way: comparing day buckets across zones "restores" dozens of days and double-counts (≈ +$585 seen on 2026-10-15).
    - Sanity-check the printed line: `span[1]` is today, `messages` ≥ the old artifact's count, both sources present.
-6. **Republish** with Artifact `file_path=<out>`, `url=https://claude.ai/artifact/Y1iiTF4oWh5ANAqhfZR3gY`. Same url, no `icon`, no `description` changes. Put the temp files in the scratchpad dir.
-7. Report new totals (INR) and span in one or two lines.
+   - UI changes in `dashboard_template.html` don't reach the artifact through this step (it keeps the old page's UI). To ship them: `./tokentrack.py dashboard all --html $SCRATCH/new.html --no-open`, then put the merged `DATA` JSON from step 5 in place of `new.html`'s `const DATA = …` value, and publish that.
+   - The Audit tab is static HTML outside `DATA`; this skill carries it over unchanged. Only `llm-cost-audit` rewrites it. When invoked with args `audit-tab` (from `llm-cost-audit`), run its `render_audit_tab.py` on the merged file now, as that skill's step 6 says, before republishing.
+6. **Republish** with Artifact `file_path=<out>`, `url=https://claude.ai/artifact/Y1iiTF4oWh5ANAqhfZR3gY`. Same url, no `icon`, no `description` changes, and no `capabilities` (leaving it out keeps the stored `db` declaration; review labels live in its `reviews` collection, one doc per session id). Put the temp files in the scratchpad dir.
+7. Report new totals (INR) and span in one or two lines. Do not print the llm-cost-audit report.
 
 ## Notes
 - Parse cache: `~/.cache/token-tracker/parse-v2`; `./tokentrack.py clear-cache` if numbers look stale.

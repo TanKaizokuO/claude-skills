@@ -1,15 +1,16 @@
 ---
 name: orchestrate
-description: Run the session as an orchestrator that delegates work to subagents, keeping the main chat clean. Asks which model orchestrates and which model works, and offloads suitable tasks to Gemini agents through Antigravity CLI (agy).
+description: Run the session as an orchestrator that delegates work to subagents, keeping the main chat clean. The session model is the orchestrator; asks which model works, and offloads suitable tasks to Gemini agents through Antigravity CLI (agy).
 ---
 
-For the rest of this session you are the **orchestrator**. The main chat carries only plans, decisions, and short results. Every piece of legwork — searching, reading files, editing, running commands, researching — happens inside a **worker** subagent, and only the worker's distilled report comes back.
+For the rest of this session you are the **orchestrator**, whichever model the session is running. The main chat carries only plans, decisions, and short results. Every piece of legwork — searching, reading files, editing, running commands, researching — happens inside a **worker** subagent, and only the worker's distilled report comes back.
 
 ## 1. Pick the roles
 
-Call `AskUserQuestion` with three single-select questions:
+The orchestrator is the session model. Don't ask which model orchestrates, and don't ask the user to run `/model`.
 
-- **Orchestrator** (header `Orchestrator`) — options: Haiku 5.5 (Recommended), Opus 5.5, Sonnet 5.5.
+Call `AskUserQuestion` with two single-select questions:
+
 - **Worker** (header `Worker`) — options: Haiku 5.5 (Recommended), Sonnet 5.5, Opus 5.5, Fable 5.1.
 - **Gemini offload** (header `Gemini`) — options: "Read-only tasks (Recommended)", "Read-only + mechanical edits", "Off". See section 3.
 
@@ -17,20 +18,15 @@ Call `AskUserQuestion` with three single-select questions:
 
 Map the worker answer to the `Agent` tool's `model` value: Haiku 5.5 → `haiku` with `effort: "high"` (the `haiku` alias resolves to the current Haiku, which is 5.5), Opus 5.5 → `opus`, Opus 5 → `opus` (the alias resolves to the current Opus, so Opus 5 cannot be pinned), Sonnet 5.5 → `sonnet`, Sonnet 5 → `sonnet` (same alias caveat), Fable 5.1 → `fable`. Workers other than Haiku 5.5 take no `effort` value. A custom "Other" answer that names none of these: ask once more.
 
-The orchestrator is the model running this main session — you cannot switch yourself. Compare the answer with your own model:
-
-- **Match** — continue.
-- **Mismatch** — tell the user to run `/model <choice>` and re-invoke `/orchestrate`, then stop.
-
 If Gemini offload is on, run `agy models` once. If `agy` is missing or the call fails on auth, tell the user to run `! agy auth login` (interactive; never log in for them) and treat Gemini as Off until they confirm.
 
-Done when the orchestrator matches your model, a worker `model` value is fixed, and the Gemini mode is known.
+Done when a worker `model` value is fixed and the Gemini mode is known.
 
 ## 2. Orchestrate
 
 For each user request:
 
-1. **Plan** — split the request into **bounded** tasks, each with one clear deliverable. Bounded means about 10 files or 30 edits at most. Every worker turn re-reads the worker's whole transcript, so a worker's cost grows much faster than its work: three whole-feature passes of 50–110 edits each once used over half of a week's subagent tokens. A pass over a whole feature, surface, or session diff becomes one worker per file group. Tasks with no dependency between them are dispatched in parallel, in one message.
+1. **Plan** — split the request into **bounded** tasks, each with one clear deliverable. Bounded means about 10 files or 30 edits at most. For Haiku 5.5 workers the hard limit is 150k context; size tasks to finish well under it, and treat a worker that compacts as a scope failure (split the rest into new tasks). Every worker turn re-reads the worker's whole transcript, so a worker's cost grows much faster than its work: three whole-feature passes of 50–110 edits each once used over half of a week's subagent tokens. A pass over a whole feature, surface, or session diff becomes one worker per file group. Tasks with no dependency between them are dispatched in parallel, in one message.
 2. **Route** — decide per task whether it goes to a Claude worker or a Gemini agent (section 3). Default to Claude when unsure.
 3. **Dispatch** — Gemini tasks go out as in section 3. Claude tasks: one `Agent` call per task with `model` set to the worker value (plus `effort: "high"` for Haiku 5.5) and a `subagent_type` that fits (`Explore` for read-only search, `Plan` for design, `general-purpose` otherwise). Workers start cold, so each prompt is self-contained:
    - the goal and why it matters;

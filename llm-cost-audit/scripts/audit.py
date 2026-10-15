@@ -1,51 +1,86 @@
 #!/usr/bin/env python3
-"""Read-only LLM spend audit over omp (~/.omp/stats.db + session JSONL) and Claude Code (~/.claude/projects JSONL).
+"""Read-only LLM spend audit (omp + Claude Code) for the Token Ledger.
 
-Costs are recomputed from raw tokens with prices.json; stored costs are ignored.
-Nothing is written except a temp copy of stats.db, which is deleted on exit.
+Headline money (spend, its split by source, model, project and day, coverage and exclusions)
+comes from the canonical tokentrack module in CANONICAL_DIR: tokentrack.collect() records,
+priced by tokentrack.price() from its pricing.json, grouped by the same day as the ledger cells.
+Session analytics (triage, detectors, supersessions) read omp's stats.db and the Claude Code
+JSONL, and are priced with the same canonical rates. Nothing is written except a temp copy of
+stats.db (deleted on exit) and the text mirror at LATEST.
 """
 import argparse, collections, datetime as dt, glob, json, os, re, shutil, sqlite3, statistics, sys, tempfile
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PR = json.load(open(os.path.join(HERE, "..", "prices.json")))
-R = PR["usd_inr"]
-MODELS = PR["models"]
-CW = PR["cache_write_mult"]
+CANONICAL_DIR = "/home/tankaizokuo/Code/projects/token-tracker"
+if not os.path.isfile(os.path.join(CANONICAL_DIR, "tokentrack.py")):
+    sys.exit(f"canonical tokentrack.py not found in {CANONICAL_DIR}; refusing to price with another table")
+sys.dont_write_bytecode = True  # the audit is read-only; do not drop __pycache__ into the canonical repo
+sys.path.insert(0, CANONICAL_DIR)
+import tokentrack as tk  # noqa: E402  canonical pricing, day grouping and record collection
+
+PRICING_PATH = os.path.join(CANONICAL_DIR, "pricing.json")
+RATES, CURRENCY = tk.load_pricing(PRICING_PATH)
+if CURRENCY.get("code") != "INR":
+    sys.exit(f"canonical currency is {CURRENCY.get('code')}; the Audit tab renders INR only")
+R = CURRENCY["per_usd"]
+SOURCES = ("omp", "claude-code")  # canonical source names
+TOOL = {"omp": "omp", "claude-code": "cc"}  # short keys used by session rows and the Audit tab
+
 EDIT_TOOLS = {"edit", "write", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 SLEEP_RE = re.compile(r"\bsleep\s+\d")
 SECRET_RE = re.compile(r"password|passwd|pwd|secret|token|api[_-]?key|bearer", re.I)
 BLOB_RE = re.compile(r"[A-Za-z0-9+/=_-]{32,}|\b[0-9a-fA-F]{24,}\b|\bsk-[A-Za-z0-9]{8,}")
-LOCAL_TZ = dt.datetime.now().astimezone().tzinfo
+from zoneinfo import ZoneInfo
+
+def dynamic_tz(tz=None):
+    name = tk.timezone_name(tz)
+    if name != "local":
+        try:
+            return ZoneInfo(name)
+        except Exception:
+            pass
+    resolved = tk.resolve_tz(tz)
+    if resolved is not None:
+        return resolved
+    return dt.datetime.now().astimezone().tzinfo
+CACHE_CTX = 100_000  # cache reads on a context above this are flagged
+HAIKU_CTX_LIMIT = 150_000  # user's hard limit for Haiku: requests with a context above this are flagged
+SLEEP_MIN_TURNS = 5
+
+# Audit policy, not prices. TIER drives the subagent detector; SUPERSESSIONS says when a newer model shipped.
+TIER = {
+    "claude-opus-5-5": "premium", "claude-opus-5": "premium", "claude-opus-4-8": "premium",
+    "claude-opus-4-7": "premium", "claude-opus-4-6": "premium", "claude-fable-5-1": "premium",
+    "claude-sonnet-5-5": "mid", "claude-sonnet-5": "mid", "claude-sonnet-4-6": "mid",
+    "gemini-3.1-pro": "mid", "gpt-6.1-sol": "mid",
+    "claude-haiku-5-5": "cheap", "claude-haiku-4-5": "cheap", "gpt-6-luna": "cheap",
+    "gemini-3.5-flash": "cheap", "gemini-3.6-flash": "cheap", "gemini-3.7-flash": "cheap",
+    "gemini-3.8-flash": "cheap", "gemini-3.1-flash-lite": "cheap",
+}
+SUPERSESSIONS = [
+    {"new": "claude-opus-5-5", "old": ["claude-opus-5", "claude-opus-4-8", "claude-opus-4-6"],
+     "available_utc": "2026-09-22T18:53:00Z"},
+    {"new": "claude-sonnet-5-5", "old": ["claude-sonnet-5", "claude-sonnet-4-6"],
+     "available_utc": "2026-09-29T17:48:00Z"},
+]
 
 
 def norm_model(m):
-    m = (m or "?").split("[")[0]
-    for p in PR["model_aliases"]["prefixes_stripped"]:
-        if m.startswith(p):
-            m = m[len(p):]
-    for s in PR["model_aliases"]["suffixes_stripped"]:
-        if m.endswith(s):
-            m = m[: -len(s)]
-    m = re.sub(r"(claude-[a-z]+-\d)\.(\d)", r"\1-\2", m)  # opus-5.5 -> opus-5-5
-    m = re.sub(r"-20\d{6}$", "", m)
-    return m
+    """Canonical model id. A bracket suffix such as '[1m]' is dropped first."""
+    return tk.normalize_model((m or "").split("[")[0])
 
 
-def cost_usd(model, i, o, cr, cw5, cw1=0):
-    p = MODELS.get(model)
-    if not p:
+def usd(model, i, o, cr, cw5, cw1=0):
+    """USD via canonical price(); None when pricing.json has no rate for the model."""
+    if model not in RATES:
         return None
-    m = p.get("cache_write_mult")
-    w5, w1 = (CW["5m"], CW["1h"]) if m is None else (m, m)
-    return (i * p["in"] + o * p["out"] + cr * p["cache_read"] + cw5 * p["in"] * w5 + cw1 * p["in"] * w1) / 1e6
+    return tk.price({"model": model, "in": i, "out": o, "cr": cr, "cw5m": cw5, "cw1h": cw1}, RATES)
 
 
-def cr_above(model, ctx, cr, thresh=100_000):
-    """USD of cache-read cost attributable to context above thresh."""
-    p = MODELS.get(model)
-    if not p or ctx <= thresh or ctx == 0:
+def cr_above(model, ctx, cr):
+    """USD of cache-read cost attributable to context above CACHE_CTX, at the rate the request was billed."""
+    if model not in RATES or ctx <= CACHE_CTX:
         return 0.0
-    return (ctx - thresh) * (cr / ctx) * p["cache_read"] / 1e6
+    return (ctx - CACHE_CTX) * (cr / ctx) * tk.rate_for(model, ctx, RATES)["cr"] / 1e6
 
 
 def safe_snippet(text, n=80):
@@ -89,7 +124,7 @@ def load_omp(cut_ms, tmp):
         m.sess = r["session_file"]
         m.proj = r["folder"]
         m.i, m.o, m.cr, m.cw5, m.cw1 = r["input_tokens"], r["output_tokens"], r["cache_read_tokens"], r["cache_write_tokens"], 0
-        m.usd = cost_usd(m.model, m.i, m.o, m.cr, m.cw5)
+        m.usd = usd(m.model, m.i, m.o, m.cr, m.cw5, m.cw1)
         m.side = r["agent_type"] == "subagent"
         m.ctx = m.i + m.cr + m.cw5
         m.id = r["entry_id"]
@@ -165,15 +200,12 @@ def load_cc(cut):
         try:
             if dt.datetime.fromtimestamp(os.path.getmtime(f), dt.timezone.utc) < cut:
                 continue
+            fh = open(f, errors="ignore")
         except OSError:
             continue
         proj = os.path.relpath(f, base).split(os.sep)[0]
         side_file = "/subagents/" in f
         by_id = {}
-        try:
-            fh = open(f, errors="ignore")
-        except OSError:
-            continue
         with fh:
             for line in fh:
                 try:
@@ -201,27 +233,31 @@ def load_cc(cut):
                             tools[f][0] += 1
                             if b.get("name") in EDIT_TOOLS:
                                 tools[f][1] += 1
+                sleeps = any(n == "Bash" and SLEEP_RE.search(cmd) for n, cmd in names)
                 key = (m.get("id"), j.get("requestId"))
+                if key in by_id:  # later content block of the same request
+                    if sleeps:
+                        by_id[key].calls.append("sleep")
+                    continue
                 u = m.get("usage")
                 if key in seen or not u or ts < cut:
-                    if key in by_id:
-                        by_id[key].calls += [n for n, cmd in names if n == "Bash" and SLEEP_RE.search(cmd)] and ["sleep"] or []
                     continue
                 seen.add(key)
                 x = Msg()
                 x.ts, x.tool, x.model = ts, "cc", norm_model(m.get("model"))
                 x.sess, x.proj = f, proj
+                if x.model == "<synthetic>":
+                    continue
                 cc = u.get("cache_creation") or {}
                 w1 = cc.get("ephemeral_1h_input_tokens", 0)
                 cw = u.get("cache_creation_input_tokens", 0)
-                x.i, x.o, x.cr, x.cw1, x.cw5 = u.get("input_tokens", 0), u.get("output_tokens", 0), u.get("cache_read_input_tokens", 0), w1, max(cw - w1, 0)
-                if x.model == "<synthetic>":
-                    continue
-                x.usd = cost_usd(x.model, x.i, x.o, x.cr, x.cw5, x.cw1)
+                x.i, x.o, x.cr, x.cw1, x.cw5 = (u.get("input_tokens", 0), u.get("output_tokens", 0),
+                                                u.get("cache_read_input_tokens", 0), w1, max(cw - w1, 0))
+                x.usd = usd(x.model, x.i, x.o, x.cr, x.cw5, x.cw1)
                 x.side = side_file or bool(j.get("isSidechain"))
                 x.ctx = x.i + x.cr + cw
                 x.id = key
-                x.calls = ["sleep"] if any(n == "Bash" and SLEEP_RE.search(cmd) for n, cmd in names) else []
+                x.calls = ["sleep"] if sleeps else []
                 by_id[key] = x
                 msgs.append(x)
     return msgs, tools, prompts
@@ -238,146 +274,299 @@ def table(title, rows, head):
         print("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
 
 
+LATEST = "~/.local/share/llm-cost-audit/latest.txt"
+
+
+class Tee:
+    # Mirror the text report to LATEST so other skills can display the last audit without re-running it.
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, s):
+        for st in self.streams:
+            st.write(s)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
+def window(days, now, tz):
+    """The last `days` calendar days in the effective timezone, today included."""
+    end = now.astimezone(tz).date()
+    return end - dt.timedelta(days=days - 1), end
+
+
+def sums(rows, key):
+    """key -> [requests, INR] over canonical records."""
+    g = collections.defaultdict(lambda: [0, 0.0])
+    for r in rows:
+        x = g[key(r)]
+        x[0] += 1
+        x[1] += r["cost"] * R
+    return g
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--days", type=int, default=7, help="calendar days in the effective timezone, today included")
+    ap.add_argument("--tz", default=None, help="timezone for day boundaries (default: canonical system zone)")
     ap.add_argument("--min-cost", type=float, default=100, help="INR threshold for the triage table")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.days < 1:
+        ap.error("--days must be at least 1")
+    if not a.json:
+        latest = os.path.expanduser(LATEST)
+        os.makedirs(os.path.dirname(latest), exist_ok=True)
+        sys.stdout = Tee(sys.stdout, open(latest, "w", buffering=1))
+
+    effective_tz = dynamic_tz(a.tz)
     now = dt.datetime.now(dt.timezone.utc)
-    cut = now - dt.timedelta(days=a.days)
+    start, end = window(a.days, now, effective_tz)
+    lo, hi = start.isoformat(), end.isoformat()
+    tz = tk.timezone_name(effective_tz)
+    pricing_doc = tk.load_pricing_doc(PRICING_PATH)
+    version = pricing_doc["version"]
+
+    # ---- headline money: canonical records, grouped by the same day the ledger cells use
+    recs = [r for r in tk.collect(RATES, a.days + 2, SOURCES, tz=effective_tz) if lo <= r["day"] <= hi]
+    state = {m: tk.model_status(m, RATES) for m in {r["model"] for r in recs}}  # True | False | "estimated"
+    billed = [r for r in recs if state[r["model"]] is not False]
+    unpriced = [r for r in recs if state[r["model"]] is False]
+    priced_rows = [r for r in billed if state[r["model"]] is True]
+    estimated_rows = [r for r in billed if state[r["model"]] == "estimated"]
+    total_usd = sum(r["cost"] for r in billed)
+    total_inr = total_usd * R
+    unp_counts = collections.Counter(r["model"] for r in unpriced)
+
+    src_sum = sums(billed, lambda r: r["source"])
+    by_source = {s: round(src_sum[s][1]) for s in SOURCES}
+    model_sum = sums(billed, lambda r: r["model"])
+    by_model = {k: [v[0], round(v[1])] for k, v in sorted(model_sum.items(), key=lambda kv: -kv[1][1])}
+    proj_sum = sums(billed, lambda r: (r["source"], r["project"]))
+    by_project = {f"{TOOL[s]} {p}": round(v[1])
+                  for (s, p), v in sorted(proj_sum.items(), key=lambda kv: -kv[1][1])[:12]}
+    day_sum = sums(billed, lambda r: r["day"])
+    by_day = {k: round(v[1]) for k, v in sorted(day_sum.items())}
+    coverage = {
+        "priced": {"requests": len(priced_rows), "cost_usd": round(sum(r["cost"] for r in priced_rows), 6)},
+        "estimated": {"requests": len(estimated_rows), "cost_usd": round(sum(r["cost"] for r in estimated_rows), 6)},
+        "unpriced": {"requests": len(unpriced)},
+    }
+
+    # spikes: days above 2x the median and above Rs 1000, with the largest driver of that day
+    med = statistics.median([v[1] for v in day_sum.values()]) if day_sum else 0
+    drivers = collections.defaultdict(collections.Counter)
+    for r in billed:
+        drivers[r["day"]][(r["source"], r["project"], r["model"])] += r["cost"] * R
+    spikes = []
+    for d in sorted(day_sum):
+        v = day_sum[d][1]
+        if v > max(2 * med, 1000):
+            (s, pj, md), c0 = drivers[d].most_common(1)[0]
+            spikes.append({"day": d, "inr": round(v), "ratio": round(v / med, 1) if med else None,
+                           "driver": {"tool": TOOL[s], "project": pj, "model": md, "inr": round(c0)}})
+
+    # ---- session analytics: omp stats.db and Claude Code JSONL, priced with the same canonical rates
+    cut = dt.datetime.combine(start, dt.time.min, tzinfo=effective_tz)
     tmp = tempfile.mkdtemp(prefix="llm-audit-")
     try:
         om, ot, op = load_omp(int(cut.timestamp() * 1000), tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     cm, ct, cp = load_cc(cut)
-    msgs = om + cm
+    msgs = [m for m in om + cm if start <= m.ts.astimezone(effective_tz).date() <= end]
     tools = {**ot, **ct}
     prompts = {**op, **cp}
     priced = [m for m in msgs if m.usd is not None]
-    unpriced = collections.Counter(m.model for m in msgs if m.usd is None)
     inr = lambda m: m.usd * R
-    total = sum(map(inr, priced))
-    day = lambda m: m.ts.astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
-    out = {"window_days": a.days, "since": cut.isoformat(), "total_inr": round(total), "unpriced_msgs": dict(unpriced)}
 
-    def group(key):
-        g = collections.defaultdict(lambda: [0, 0.0])
-        for m in priced:
-            x = g[key(m)]
+    sess = collections.defaultdict(lambda: {"inr": 0.0, "n": 0, "priced_n": 0, "unpriced_n": 0,
+                                            "tool": "", "model": collections.Counter(),
+                                            "models_count": collections.Counter(),
+                                            "first": None, "proj": "", "side": False})
+    for m in msgs:
+        s = sess[m.sess]
+        s["n"] += 1
+        s["tool"] = m.tool
+        s["first"] = min(s["first"] or m.ts, m.ts)
+        s["proj"] = m.proj
+        s["side"] = m.side
+        s["models_count"][m.model] += 1
+        if m.usd is not None:
+            s["inr"] += inr(m)
+            s["priced_n"] += 1
+            s["model"][m.model] += inr(m)
+        else:
+            s["unpriced_n"] += 1
+
+    def sess_top_model(s):
+        if s["model"]:
+            return s["model"].most_common(1)[0][0]
+        if s["models_count"]:
+            return s["models_count"].most_common(1)[0][0]
+        return "unknown"
+    # sleep-poll loops: sessions with >= SLEEP_MIN_TURNS sleep turns at >= 100k context
+    sl = collections.defaultdict(lambda: [0, 0.0, 0])
+    for m in priced:
+        if m.calls and m.ctx >= 100_000:
+            x = sl[m.sess]
             x[0] += 1
             x[1] += inr(m)
-        return sorted(g.items(), key=lambda kv: -kv[1][1])
-
-    sess = collections.defaultdict(lambda: {"inr": 0.0, "n": 0, "tool": "", "model": collections.Counter(), "first": None, "proj": "", "side": False, "ctxmax": 0})
-    for m in priced:
-        s = sess[m.sess]
-        s["inr"] += inr(m); s["n"] += 1; s["tool"] = m.tool; s["model"][m.model] += inr(m)
-        s["first"] = min(s["first"] or m.ts, m.ts); s["proj"] = m.proj; s["side"] = m.side; s["ctxmax"] = max(s["ctxmax"], m.ctx)
-
-    d_tool = {k: round(v[1]) for k, v in group(lambda m: m.tool)}
-    out["by_tool"] = d_tool
-    out["by_model"] = {k: [v[0], round(v[1])] for k, v in group(lambda m: m.model)}
-    out["by_project"] = {k: round(v[1]) for k, v in group(lambda m: (m.tool, short_proj(m.proj)))[:15]} if False else None
-    days = sorted(group(lambda m: day(m)), key=lambda kv: kv[0])
-    out["by_day"] = {k: round(v[1]) for k, v in days}
-
-    # ---- spikes: days > 2x median and > Rs 1000
-    dv = [v[1] for _, v in days]
-    med = statistics.median(dv) if dv else 0
-    spikes = []
-    for k, v in days:
-        if v[1] > max(2 * med, 1000):
-            ms = [m for m in priced if day(m) == k]
-            drv = collections.Counter()
-            for m in ms:
-                drv[(m.tool, short_proj(m.proj), m.model)] += inr(m)
-            (tl, pj, md), c0 = drv.most_common(1)[0]
-            spikes.append((k, fmt(v[1]), f"{v[1]/med:.1f}x" if med else "-", f"{tl} {pj} {md} Rs{fmt(c0)}"))
-    out["spikes"] = [list(s) for s in spikes]
-
-    # ---- detectors
-    sleep_turns = [m for m in priced if m.calls and m.ctx >= 100_000]
-    sl = collections.defaultdict(lambda: [0, 0.0, 0])
-    for m in sleep_turns:
-        x = sl[m.sess]; x[0] += 1; x[1] += inr(m); x[2] = max(x[2], m.ctx)
-    sleep_rows = [(s[0][-2:] if False else (sess[k]["first"].astimezone(LOCAL_TZ).strftime("%m-%d")), sess[k]["tool"], v[0], v[2] // 1000, fmt(v[1]), short_proj(sess[k]["proj"]))
-                  for k, v in sorted(sl.items(), key=lambda kv: -kv[1][1]) if v[0] >= 5 for s in [("",)]][:8]
-    sleep_total = sum(v[1] for v in sl.values() if v[0] >= 5)
-    sleep_n = sum(v[0] for v in sl.values() if v[0] >= 5)
+            x[2] = max(x[2], m.ctx)
+    sleep_rows = [(sess[k]["first"].astimezone(effective_tz).strftime("%m-%d"), sess[k]["tool"], v[0], v[2] // 1000,
+                   fmt(v[1]), short_proj(sess[k]["proj"]))
+                  for k, v in sorted(sl.items(), key=lambda kv: -kv[1][1]) if v[0] >= SLEEP_MIN_TURNS][:8]
+    sleep_total = sum(v[1] for v in sl.values() if v[0] >= SLEEP_MIN_TURNS)
+    sleep_n = sum(v[0] for v in sl.values() if v[0] >= SLEEP_MIN_TURNS)
 
     cr_by_tool = collections.defaultdict(float)
     for m in priced:
         cr_by_tool[m.tool] += cr_above(m.model, m.ctx, m.cr) * R
     cr_total = sum(cr_by_tool.values())
 
-    ro_rows, ro_total = [], 0.0
-    for k, s in sess.items():
-        if not s["side"]:
-            continue
-        top = s["model"].most_common(1)[0][0]
-        if MODELS[top]["tier"] != "premium" and MODELS[top]["tier"] != "mid":
-            continue
-        if tools.get(k, [0, 0])[1] == 0:
-            ro_total += s["inr"]
+    # Haiku requests over HAIKU_CTX_LIMIT, split by tool and main vs subagent
+    hk = collections.defaultdict(lambda: {"sessions": set(), "requests": 0, "inr": 0.0, "max_ctx": 0})
+    for m in priced:
+        if "haiku" in m.model and m.ctx > HAIKU_CTX_LIMIT:
+            h = hk[(m.tool, "subagent" if m.side else "main")]
+            h["sessions"].add(m.sess)
+            h["requests"] += 1
+            h["inr"] += inr(m)
+            h["max_ctx"] = max(h["max_ctx"], m.ctx)
+    haiku_over = {}
+    for (tl, side), h in sorted(hk.items()):
+        haiku_over.setdefault(tl, {})[side] = {"sessions": len(h["sessions"]), "requests": h["requests"],
+                                               "inr": round(h["inr"]), "max_ctx": h["max_ctx"]}
+
+    # subagent sessions with no edits whose main model is premium or mid tier
+    untiered = set()
+    ro_total = 0.0
     ro_by_model = collections.defaultdict(float)
     for k, s in sess.items():
-        if s["side"] and tools.get(k, [0, 0])[1] == 0:
-            top = s["model"].most_common(1)[0][0]
-            if MODELS[top]["tier"] in ("premium", "mid"):
-                ro_by_model[(s["tool"], top)] += s["inr"]
+        if not s["side"] or tools.get(k, [0, 0])[1] != 0:
+            continue
+        top = sess_top_model(s)
+        tier = TIER.get(top)
+        if tier is None:
+            untiered.add(top)
+            continue
+        if tier in ("premium", "mid"):
+            ro_total += s["inr"]
+            ro_by_model[(s["tool"], top)] += s["inr"]
 
     after_rows, after_total = [], 0.0
-    for sup in PR["supersessions"]:
+    for sup in SUPERSESSIONS:
+        if sup["new"] not in RATES:
+            sys.exit(f"supersession target {sup['new']} has no rate in pricing.json")
         av = dt.datetime.fromisoformat(sup["available_utc"].replace("Z", "+00:00"))
         for tl in ("omp", "cc"):
             ms = [m for m in priced if m.tool == tl and m.model in sup["old"] and m.ts >= av]
             if not ms:
                 continue
             cur = sum(map(inr, ms))
-            new = sum(cost_usd(sup["new"], m.i, m.o, m.cr, m.cw5, m.cw1) * R for m in ms)
-            after_rows.append((tl, "/".join(sorted({m.model for m in ms})), f"-> {sup['new']}", len(ms), fmt(cur), fmt(new), fmt(cur - new)))
+            new = sum(usd(sup["new"], m.i, m.o, m.cr, m.cw5, m.cw1) * R for m in ms)
+            after_rows.append((tl, "/".join(sorted({m.model for m in ms})), f"-> {sup['new']}", len(ms),
+                               fmt(cur), fmt(new), fmt(cur - new)))
             after_total += cur - new
 
-    # ---- triage
     tri = []
     for k, s in sess.items():
         if s["inr"] >= a.min_cost and tools.get(k, [0, 0])[1] == 0:
-            tri.append((s["inr"], s["first"].astimezone(LOCAL_TZ).strftime("%m-%d"), s["tool"], s["model"].most_common(1)[0][0],
-                        tools.get(k, [0, 0])[0], prompts.get(k, "(subagent / no prompt)" if s["side"] else "(no user prompt recorded)")))
+            tri.append((s["inr"], s["first"].astimezone(effective_tz).strftime("%m-%d"), s["tool"],
+                        sess_top_model(s), tools.get(k, [0, 0])[0],
+                        prompts.get(k, "(subagent / no prompt)" if s["side"] else "(no user prompt recorded)")))
     tri.sort(reverse=True)
-    out["triage"] = [dict(inr=round(t[0]), date=t[1], tool=t[2], model=t[3], tool_calls=t[4], prompt=t[5]) for t in tri]
-    out["detectors"] = {"sleep_poll_inr": round(sleep_total), "sleep_turns": sleep_n, "cache_read_above_100k_inr": round(cr_total),
-                        "readonly_expensive_subagent_inr": round(ro_total), "old_model_after_availability_avoidable_inr": round(after_total)}
     top5 = sorted(sess.items(), key=lambda kv: -kv[1]["inr"])[:5]
-    out["top_sessions"] = [dict(inr=round(s["inr"]), tool=s["tool"], date=s["first"].astimezone(LOCAL_TZ).strftime("%m-%d"), calls=s["n"], model=s["model"].most_common(1)[0][0], project=short_proj(s["proj"])) for _, s in top5]
-    pj = group(lambda m: (m.tool, short_proj(m.proj)))[:12]
-    out["by_project"] = {f"{k[0]} {k[1]}": round(v[1]) for k, v in pj}
+
+    out = {
+        "range": {"start": lo, "end": hi, "days": a.days, "timezone": tz},
+        "sources": list(SOURCES),
+        "pricing": {
+            "version": version,
+            "filename": os.path.basename(PRICING_PATH),
+            "source": os.path.basename(PRICING_PATH),
+            "sources": pricing_doc.get("sources", {}),
+            "models": len(RATES),
+            "currency": CURRENCY,
+        },
+        "total_inr": round(total_inr),
+        "total_usd": round(total_usd, 6),
+        "by_source": by_source,
+        "by_model": by_model,
+        "by_project": by_project,
+        "by_day": by_day,
+        "coverage": coverage,
+        "unpriced": dict(unp_counts),
+        "spikes": spikes,
+        "detectors": {
+            "sleep_poll_inr": round(sleep_total), "sleep_turns": sleep_n,
+            "cache_read_above_100k_inr": round(cr_total),
+            "readonly_expensive_subagent_inr": round(ro_total),
+            "old_model_after_availability_avoidable_inr": round(after_total),
+            "untiered_models": sorted(untiered),
+        },
+        "haiku_over_limit": haiku_over,
+        "triage": [dict(inr=round(t[0]), date=t[1], tool=t[2], model=t[3], tool_calls=t[4], prompt=t[5]) for t in tri],
+        "top_sessions": [dict(inr=round(s["inr"]), tool=s["tool"], date=s["first"].astimezone(effective_tz).strftime("%m-%d"),
+                              calls=s["n"], model=sess_top_model(s), project=short_proj(s["proj"]))
+                         for _, s in top5],
+        "session_analytics": {
+            "sessions": len(sess),
+            "requests": len(msgs),
+            "inr": round(sum(s["inr"] for s in sess.values())),
+            "priced_requests": len(priced),
+            "unpriced_requests": len(msgs) - len(priced),
+            "unpriced_sessions": sum(1 for s in sess.values() if s["priced_n"] == 0),
+        },
+        "min_cost": a.min_cost,
+    }
 
     if a.json:
         json.dump(out, sys.stdout, indent=1)
         print()
         return
 
-    print(f"LLM spend audit: last {a.days} day(s) since {cut.astimezone(LOCAL_TZ):%Y-%m-%d %H:%M}; {len(priced)} priced requests, {len(sess)} sessions")
-    print(f"Caveat: Rs is API-equivalent value at {R}/USD recomputed from raw tokens; it may not be cash if you are on a subscription.")
-    print(f"\nTOTAL Rs {fmt(total)}   " + "  ".join(f"{k}: Rs {fmt(v)}" for k, v in d_tool.items()))
-    if unpriced:
-        print("unpriced (not in prices.json, excluded):", dict(unpriced))
-    table("per model", [(k, v[0], fmt(v[1]), f"{v[1]/total:.0%}" if total else "-") for k, v in group(lambda m: m.model)], ["model", "reqs", "Rs", "share"])
-    table("per project (top 12)", [(k[0], k[1], v[0], fmt(v[1])) for k, v in pj], ["tool", "project", "reqs", "Rs"])
-    table("per day", [(k, v[0], fmt(v[1])) for k, v in days], ["day", "reqs", "Rs"])
-    table("top 5 sessions", [(fmt(s["inr"]), s["tool"], s["first"].astimezone(LOCAL_TZ).strftime("%m-%d"), s["n"], s["model"].most_common(1)[0][0], short_proj(s["proj"])) for _, s in top5], ["Rs", "tool", "date", "reqs", "model", "project"])
-    table("spikes (day > 2x median and > Rs 1000)", spikes, ["day", "Rs", "vs median", "top driver"])
-    print("\n== waste detectors ==")
-    print(f"sleep-poll loops (sessions with >=5 sleep turns at >=100k ctx): {sleep_n} turns, Rs {fmt(sleep_total)} floor (turn cost only)")
+    print(f"LLM spend audit: {lo} to {hi} ({a.days} days, {tz}); sources: {', '.join(SOURCES)}")
+    print(f"Pricing: canonical tokentrack pricing.json, version {version}, {R} INR per USD. "
+          "Values are API-equivalent, not cash on a subscription.")
+    print(f"\nTOTAL Rs {fmt(total_inr)}   " + "  ".join(f"{k}: Rs {fmt(v)}" for k, v in by_source.items()))
+    print(f"coverage: priced {len(priced_rows)} requests Rs {fmt(coverage['priced']['cost_usd'] * R)}; "
+          f"estimated {len(estimated_rows)} requests Rs {fmt(coverage['estimated']['cost_usd'] * R)}; "
+          f"unpriced {len(unpriced)} requests (excluded, not Rs 0)")
+    if unp_counts:
+        print(f"unpriced (no rate in pricing.json, excluded): {dict(unp_counts)}")
+    table("per model", [(k, v[0], fmt(v[1]), f"{v[1] / total_inr:.0%}" if total_inr else "-")
+                        for k, v in model_sum.items()], ["model", "reqs", "Rs", "share"])
+    table("per project (top 12)", [(k, fmt(v)) for k, v in by_project.items()], ["tool project", "Rs"])
+    table("per day", [(k, fmt(v)) for k, v in by_day.items()], ["day", "Rs"])
+    table("top 5 sessions (session analytics, priced)", [(fmt(s["inr"]), s["tool"], s["first"].astimezone(effective_tz).strftime("%m-%d"),
+                                                 s["n"], sess_top_model(s), short_proj(s["proj"]))
+                                                for _, s in top5], ["Rs", "tool", "date", "reqs", "model", "project"])
+    table("spikes (day > 2x median and > Rs 1000)",
+          [(s["day"], fmt(s["inr"]), f"{s['ratio']}x" if s["ratio"] else "-",
+            f"{s['driver']['tool']} {s['driver']['project']} {s['driver']['model']} Rs{fmt(s['driver']['inr'])}")
+           for s in spikes], ["day", "Rs", "vs median", "top driver"])
+    print("\n== waste detectors (flags for review, not proof of waste) ==")
+    print(f"sleep-poll loops (sessions with >={SLEEP_MIN_TURNS} sleep turns at >=100k ctx): {sleep_n} turns, "
+          f"Rs {fmt(sleep_total)} floor (turn cost only)")
     for r in sleep_rows:
         print("   ", " | ".join(map(str, ("date " + r[0], r[1], f"{r[2]} turns", f"max ctx {r[3]}k", "Rs " + r[4], r[5]))))
-    print(f"cache reads above 100k context: Rs {fmt(cr_total)}  (" + ", ".join(f"{k} Rs {fmt(v)}" for k, v in cr_by_tool.items()) + ")")
-    print(f"premium/mid models on subagent sessions with zero edit/write: Rs {fmt(ro_total)}  (" + ", ".join(f"{k[0]} {k[1]} Rs {fmt(v)}" for k, v in sorted(ro_by_model.items(), key=lambda kv: -kv[1])[:5]) + ")")
-    table("old-model use AFTER the newer model was available (avoidable part only)", after_rows, ["tool", "old model(s)", "new", "reqs", "paid Rs", "at new Rs", "avoidable Rs"])
-    print(f"\n== TRIAGE: sessions >= Rs {fmt(a.min_cost)} with zero edit/write calls ({len(tri)} sessions, Rs {fmt(sum(t[0] for t in tri))}) ==")
+    print(f"cache reads above 100k context: Rs {fmt(cr_total)}  ("
+          + ", ".join(f"{k} Rs {fmt(v)}" for k, v in cr_by_tool.items()) + ")")
+    print(f"Haiku over {HAIKU_CTX_LIMIT // 1000}k context:" + ("" if hk else "  (none)"))
+    for (tl, side), h in sorted(hk.items()):
+        print(f"   {tl} {side}: {len(h['sessions'])} sessions, {h['requests']} reqs, Rs {fmt(h['inr'])}, "
+              f"max ctx {h['max_ctx'] // 1000}k")
+    print(f"premium/mid models on subagent sessions with zero edit/write: Rs {fmt(ro_total)}  ("
+          + ", ".join(f"{k[0]} {k[1]} Rs {fmt(v)}" for k, v in sorted(ro_by_model.items(), key=lambda kv: -kv[1])[:5]) + ")")
+    if untiered:
+        print(f"no tier for {', '.join(sorted(untiered))}; those subagent sessions were not classified")
+    table("old-model use AFTER the newer model was available (avoidable part only)", after_rows,
+          ["tool", "old model(s)", "new", "reqs", "paid Rs", "at new Rs", "avoidable Rs"])
+    print(f"\n== TRIAGE: sessions >= Rs {fmt(a.min_cost)} with zero edit/write calls "
+          f"({len(tri)} sessions, Rs {fmt(sum(t[0] for t in tri))}) ==")
     print("Judge research vs waste; prompts are redacted if they look like they contain secrets.")
     for t in tri:
         print(f"{t[1]}  {t[2]:<3}  {t[3]:<18} Rs {fmt(t[0]):>7}  calls {t[4]:>4}  | {t[5]}")

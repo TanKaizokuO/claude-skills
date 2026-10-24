@@ -56,6 +56,7 @@ Feature and refactor plans filed by `plan-to-issues` live in full in the GitHub 
 | [`latex-paper`](latex-paper/SKILL.md) | auto | Edits, builds, audits citations in, or converts LaTeX (`.tex`/`.bib`) papers. Runs only the requested branch (EDIT, BUILD, REFERENCES, VENUE) and keeps locked files and the configured bibliography backend unchanged. |
 | [`study-pack`](study-pack/SKILL.md) | auto | Builds a self-contained exam revision pack (HTML by default) from supplied notes and past papers, with traceable source IDs, provenance labels, and no invented marking schemes. |
 | [`llm-cost-audit`](llm-cost-audit/SKILL.md) | auto | Weekly read-only audit of LLM spend (omp and Claude Code) in INR. Prices in `prices.json`, logic in `scripts/audit.py`. |
+| [`suggest-model`](suggest-model/SKILL.md) | auto | Recommends a model using personal intelligence/cost benchmarks and live 5-hour/weekly subscription limits; preserves shared-pool boundaries and flags unknown usage. |
 | [`token-ledger-update`](token-ledger-update/SKILL.md) | auto | Refreshes the "Token Ledger" Claude artifact from omp and Claude Code usage. |
 | [`teach-me`](teach-me/SKILL.md) | manual | Creates a multi-session learning workspace to teach a new skill or concept with mission and reference materials. |
 | [`my-writing-great-skills`](my-writing-great-skills/SKILL.md) | manual | Reference vocabulary and principles for authoring reliable, predictable skills. |
@@ -80,7 +81,7 @@ omp reads skills from `~/.omp/agent/skills`. Symlink the ones you want:
 ln -s ~/.claude/skills/<name> ~/.omp/agent/skills/<name>
 ```
 
-Invoke an omp skill with `/skill:<name> <arguments>`.
+Invoke an omp skill with `/skill:<name> <arguments>` (for example, `/skill:suggest-model review this authentication change`).
 
 If omp already has its own copy of a skill (some have diverged), check before replacing it.
 

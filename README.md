@@ -52,6 +52,7 @@ Skills marked **manual** set `disable-model-invocation: true`. They only run whe
 | [`sway`](sway/SKILL.md) | auto | Edits this machine's Sway/Wayland config (keybindings, monitors, lockscreen, waybar, fuzzel, mako). |
 | [`lab`](lab/SKILL.md) | manual | Takes a college lab from handout to zipped submission, using Colab via colab-mcp for Python. |
 | [`llm-cost-audit`](llm-cost-audit/SKILL.md) | auto | Weekly read-only audit of LLM spend (omp and Claude Code) in INR. Prices in `prices.json`, logic in `scripts/audit.py`. |
+| [`suggest-model`](suggest-model/SKILL.md) | auto | Recommends a model using personal intelligence/cost benchmarks and live 5-hour/weekly subscription limits; preserves shared-pool boundaries and flags unknown usage. |
 | [`token-ledger-update`](token-ledger-update/SKILL.md) | auto | Refreshes the "Token Ledger" Claude artifact from omp and Claude Code usage. |
 | [`teach-me`](teach-me/SKILL.md) | manual | Creates a multi-session learning workspace to teach a new skill or concept with mission and reference materials. |
 | [`my-writing-great-skills`](my-writing-great-skills/SKILL.md) | manual | Reference vocabulary and principles for authoring reliable, predictable skills. |
@@ -75,6 +76,8 @@ omp reads skills from `~/.omp/agent/skills`. Symlink the ones you want:
 ```sh
 ln -s ~/.claude/skills/<name> ~/.omp/agent/skills/<name>
 ```
+
+Invoke an omp skill with `/skill:<name> <arguments>` (for example, `/skill:suggest-model review this authentication change`).
 
 If omp already has its own copy of a skill (some have diverged), check before replacing it.
 

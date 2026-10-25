@@ -1,6 +1,6 @@
 ---
 name: suggest-model
-description: Recommend a model for a task using the user's intelligence scores, cost per task, and live subscription headroom. Use when asked which model to use, to compare model value, or to conserve weekly or 5-hour usage.
+description: Recommend GPT, Claude, or Gemini using task fit, the user's intelligence scores, and live subscription headroom; treat benchmark cost as secondary. Use when asked which model to use, to compare model value, or to conserve weekly or 5-hour usage.
 ---
 
 # Suggest a model
@@ -19,9 +19,11 @@ Choose the lowest adequate tier, stating the reason:
 | 2 — Medium | 45–49 | Multi-step implementation, localized debugging, routine review with meaningful judgment. |
 | 1 — High | 50+ | Ambiguous architecture, difficult debugging, cross-system reasoning, high-consequence decisions. |
 
-These examples guide judgment, not guarantees. A task may need a particular score within a tier; state the reason for that stronger requirement. A higher tier is eligible for a lower-tier task, but extra intelligence alone does not justify extra cost. Never silently lower the capability requirement to fit available quota.
+These examples guide judgment, not guarantees. A task may need a particular score within a tier; state the reason for that stronger requirement. The tier is an adequacy floor, not an instruction to choose its cheapest model. A higher tier is eligible for a lower-tier task, but an upgrade needs a task-fit or availability reason. Never silently lower the capability requirement to fit available quota.
 
-**Complete when:** the required tier (and any stronger score floor), task-specific capability constraints, and explicit user preferences are recorded.
+Record task fit separately from the general intelligence score. Use explicit user preferences, concrete task constraints, and relevant user-reported outcomes or task-specific evaluations. If no comparative evidence exists, say **task fit unmeasured** and treat eligible families equally on fit. Do not invent vendor strengths, latency, context limits, tool support, or task-success rates from a model name or a general intelligence score. Do not raise the score floor just to force a preferred family.
+
+**Complete when:** the required tier (and any stronger score floor), task-specific constraints and fit evidence, and explicit user preferences are recorded.
 
 ## 2. Fetch current usage
 
@@ -58,6 +60,8 @@ The user's subscriptions and default routes are:
 
 The user explicitly said to **ignore the word “Fallback.”** It does not create another provider, subscription, or spare quota pool. The two Haiku High observations and the two Sonnet High observations remain separate benchmark entries, distinguished by intelligence and cost; they do not imply independently selectable routes. Do not invent a CLI model ID or promise a particular benchmark result from the same named configuration. When the observations would change the choice and no distinguishing configuration is known, explain the uncertainty and use the lower score and higher cost as a conservative decision envelope; retain the original observations in the catalog.
 
+Apply that conservative envelope **before** tier filtering and ranking. In particular, an indistinguishable Sonnet High configuration is not a confirmed Tier 1 choice merely because one observation scored 52.
+
 Antigravity can also report **“Claude & GPT (shared)”** limits. Those are a different third-party pool, not Gemini headroom and not native Claude Code or ChatGPT headroom. Exclude them under the default routes above. If the user explicitly identifies a different actual route, bind the model to that route's matching account and model/shared-group limits, and disclose the route change; never silently borrow another pool.
 
 Apply **all** binding limits, including shared account limits and model/family-specific sublimits. Switching Claude effort or model does not escape a shared Claude limit; likewise for the GPT models. Keep any extra reported window as a constraint rather than discarding it because it is not 5-hour or weekly.
@@ -68,22 +72,38 @@ Evaluate accounts separately. Do not add account percentages, deduplicate indepe
 
 **Complete when:** each candidate has its subscription/account, all binding limits, 5-hour and weekly remaining values or explicit unknown/unreported states, reset times, and evidence timestamp.
 
-## 4. Choose by capability, availability, sustainability, then cost
+## 4. Compare all families; choose for task fit and subscription balance
 
-1. Filter to models meeting the capability requirement and any explicit user budget or preferences. Use only the catalog below unless the user updates it. If no catalog configuration meets those constraints even before considering quota, report the constraint conflict; a reset or another usage reading cannot fix it.
-2. Exclude exhausted or explicitly blocked candidates. Prefer candidates with confirmed bindings and current evidence over unknown ones. If none are confirmed to meet the requirement, report that fact: give only a clearly conditional suggestion and request the missing readings, or offer waiting for a reported reset. An exhausted model is never the current recommendation. A lower-tier option must be labeled a capability compromise, not a substitute meeting the requirement.
-3. Assess **both** windows and shared/model-specific limits. Treat positive headroom of **10% or less as critical**, **over 10% through 25% as conserve**, and **over 25% as normal**. These are planning thresholds, not provider-imposed blocks. The tightest binding limit determines the quota condition.
+1. Evaluate **GPT, Claude, and Gemini**, not just the cheapest catalog rows or the family running this conversation. Filter to configurations meeting the capability requirement and explicit user constraints, using conservative envelopes where needed. Use only the catalog below unless the user updates it. Record why a family has no adequate candidate; do not silently drop it because its benchmark USD/task is higher. If no configuration meets the constraints even before quota, report the constraint conflict; another usage reading cannot fix it.
+2. Exclude exhausted or explicitly blocked candidates. Prefer confirmed bindings and current evidence over unknown ones. If none are confirmed to meet the requirement, give only a clearly conditional suggestion and request the missing readings, or offer waiting for a reported reset. An exhausted model is never the current recommendation. A lower-tier option must be labeled a capability compromise, not an adequate substitute.
+3. Assess **both** windows and every shared/model-specific limit. Treat positive headroom of **10% or less as critical**, **over 10% through 25% as conserve**, and **over 25% as normal**. These are planning thresholds, not provider-imposed blocks. The tightest binding limit determines the quota condition.
 4. Check weekly pacing when a weekly limit has a known duration and future reset: compare its remaining fraction with `(resetsAt - now) / durationMs`, capped at 1. Less remaining than the fraction of the week still left is a **weekly pace risk** under an even-use assumption. This is a conservation signal, not a prediction of task capacity; label the assumption. Without a usable reset/duration, pacing is unknown. Do not turn dollars per task into quota consumption or estimate tasks remaining without measured task-level quota burn.
-5. Rank confirmed adequate choices by **headroom band first** (normal, then conserve, then critical), **weekly pacing second** (known on-pace before at-risk or unknown pacing), **lowest cost per task third**, and **higher intelligence for cost ties**. Raw percentage differences within the same band do not outrank cost. This preserves scarce pools while keeping cost decisive between similarly sustainable choices. If all choices are under pressure but available, keep this ordering and warn; planning thresholds are not hard blocks. If conserving quota substantially increases cost, show the cheaper adequate option and explain the tradeoff. A task-specific intelligence upgrade needs a stated reason. Honor an explicit user's priority, but never override actual exhaustion or hide unknown quota.
+5. Default to **task fit + subscription balance** for the subscription routes above. The catalog's USD/task is a benchmark measurement, **not marginal cash spend on these subscriptions**. Rank confirmed adequate choices in this order:
+   - **Quota condition:** normal before conserve before critical.
+   - **Weekly pacing:** known on-pace before at-risk or unknown pacing.
+   - **Supported task fit:** prefer relevant comparative evidence or an explicit soft preference; if unmeasured, keep candidates tied on fit. Hard capability constraints were already applied.
+   - **Subscription balance:** for each remaining pool, take the minimum remaining fraction across its binding limits. Keep pools within **10 percentage points** of the highest such value; prefer these over materially tighter pools even within the same headroom band. This is a conservation heuristic, not an assertion that equal provider percentages buy equal work. Do not use incomplete/unknown limits to claim a pool has more headroom. Differences of 10 points or less are a tie, not a reason to chase tiny fluctuations.
+   - **Right-sized capability, then benchmark cost:** within the retained pools, prefer the required tier over an unnecessary higher tier. For judgment-heavy work within that tier, prefer higher conservative intelligence, explaining that this is a general capability proxy, not a task-specific result. For bounded mechanical work without evidence that extra intelligence helps, skip that upgrade. Use lower benchmark USD/task as the final tie-break; an exact tie is a tie, not an automatic preference for GPT or the current provider.
+6. Honor an explicit request to minimize benchmark cost, favor a family, or use a different verified route; state how it changes the default ordering. Never override exhaustion, a hard capability requirement, or unknown quota. If all adequate choices are under pressure but available, apply the ordering and warn; planning thresholds are not blocks. A larger benchmark cost alone is not a reason to reject Claude or Gemini on a subscription. Equally, do not rotate providers or force a non-GPT winner merely for variety: a GPT recommendation is valid when it wins under the stated policy.
 
-**Complete when:** one recommendation and at most two useful alternatives are justified against the capability requirement, both quota windows, weekly pacing, and supplied cost. If there is no confirmed adequate choice, that limitation is the result, not an invitation to invent availability.
+**Complete when:** every family was assessed, and one recommendation plus at most two useful alternatives is justified by capability, fit evidence, both quota windows, weekly pacing, and the applicable cost priority. If there is no confirmed adequate choice, that limitation is the result, not an invitation to invent availability.
 
 ## 5. Respond compactly
 
-- State the task's required tier and the recommended model/effort, or state that no adequate model is confirmed available.
-- Use one comparison table, at most three candidates: exact model/effort and benchmark observation, intelligence, USD/task, subscription, 5-hour left and reset, weekly left and reset, quota condition. Distinguish measured observations from a conservative envelope if one affected the decision.
-- Give one short reason covering the decisive capability/cost/quota tradeoff. Explain an unexpectedly expensive choice or a rejected cheaper option. Report weekly pace risk when it affected the decision.
+- State the required tier, the recommended model/effort (or that none is confirmed adequate), and the selection mode: **task fit + subscription balance** unless explicitly overridden.
+- Use one comparison table, at most three candidates: exact model/effort and benchmark observation, intelligence, **benchmark USD/task**, subscription, 5-hour left and reset, weekly left and reset, quota condition, and decisive fit/balance evidence. Distinguish observations from a conservative envelope.
+- Include the best eligible alternative from each other family, within that three-row limit. For a family with no adequate available candidate, give its concrete exclusion or uncertainty instead of fabricating an alternative. This comparison is required even when GPT wins; diversity in the comparison does not require diversity in the winner.
+- Give one short reason covering the decisive fit/capability/quota tradeoff and the benchmark-cost tie-break, if used. Report weekly pace risk when it affected the decision. Do not describe a higher benchmark cost as extra subscription cash spend.
 - Include the usage observation time and source; show resets in the user's known timezone, otherwise UTC. Mark unknown, unreported, stale, user-reported, and simulated data explicitly. Never describe a recommendation as usage-verified when a binding window is unknown.
+
+## Decision examples — simulated, not current usage
+
+These illustrate the default policy, not usage evidence for a real recommendation. Assume all binding limits are known, all pools are normal and weekly on-pace, and task fit is unmeasured unless stated. Percentages below are each pool's tightest binding limit.
+
+- **Mechanical task; GPT 40%, Claude 85%, Gemini 55%:** choose Haiku High using its conservative envelope (38, $0.12). Claude has materially more headroom; Luna's $0.07 benchmark does not override subscription balance.
+- **Mechanical task; GPT 40%, Claude 50%, Gemini 90%:** choose Gemini Flash High. Its higher benchmark cost is not an extra subscription charge.
+- **Judgment-heavy Tier 1 task with floor 50; all pools 80%:** choose Opus High (54) over Sol High (50), using general capability as the stated proxy—not a claim of measured task-specific superiority. Gemini is below the floor; ambiguous Sonnet High is conservatively 47.
+- **Mechanical task; GPT 80%, Claude 90%, Gemini 88%:** all pools are within 10 points of the best. With no comparative fit evidence or need for more intelligence, Luna Max wins the final benchmark-cost tie-break. Do not force a different provider.
 
 ## Model catalog — user-supplied measurements
 

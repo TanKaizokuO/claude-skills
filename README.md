@@ -11,17 +11,17 @@ Skills marked **manual** set `disable-model-invocation: true`. They only run whe
 | Skill | Mode | What it does |
 |---|---|---|
 | [`whats-next`](whats-next/SKILL.md) | manual | Brief report of what is done, what is next, and what is blocked. Read-only. |
-| [`plan-doc`](plan-doc/SKILL.md) | auto | Creates a `PLAN.md` / `ROADMAP.md` / goals file in house style. Plan only, no implementation. |
+| [`plan-to-issues`](plan-to-issues/SKILL.md) | auto | Plans a feature or refactor as GitHub issues, each with a full implementation plan in the body, or files a supplied plan as those issues. Reads the repo's rules and existing issues and PRs first; publishes only after approval. |
 | [`sync-docs`](sync-docs/SKILL.md) | manual | Updates the project's state docs to match current progress, with proof for each change. Leaves the commit to `push-to-gh`. |
 | [`handoff`](handoff/SKILL.md) | manual | Writes a self-contained handoff file to `/tmp` so a fresh session can resume. Run before `/clear`. |
 | [`orchestrate`](orchestrate/SKILL.md) | auto | Runs the session as an orchestrator that delegates to subagents, including Gemini agents through Antigravity CLI (`agy`). |
 | [`which-skill`](which-skill/SKILL.md) | manual | Interactive router that recommends the right skill or flow for your current situation. |
-| [`setup-repo-skills`](setup-repo-skills/SKILL.md) | manual | Scaffolds repository configuration (issue tracker, triage labels, domain docs layout) for engineering skills. |
-| [`create-spec`](create-spec/SKILL.md) | manual | Synthesizes the current conversation into a local specification document without interviewing. |
-| [`spec-to-tickets`](spec-to-tickets/SKILL.md) | manual | Breaks a spec or plan into tracer-bullet tickets with explicit blocking dependencies. |
+| [`setup-repo-skills`](setup-repo-skills/SKILL.md) | manual | Scaffolds repository configuration (issue tracker, defaulting to GitHub Issues; triage labels; domain docs layout) for engineering skills. |
 | [`build-and-review`](build-and-review/SKILL.md) | auto | Builds work from a spec, ticket set, or description test-first, reviews the diff, and commits on the working branch. |
 | [`triage-issues`](triage-issues/SKILL.md) | manual | Triages issues and PRs through a state machine, verifying claims and writing agent-ready briefs. |
 | [`auto-mato`](auto-mato/SKILL.md) | auto | Generates an interactive bash wizard for human-guided manual procedures, setups, and state transitions. |
+
+Feature and refactor plans filed by `plan-to-issues` live in full in the GitHub issue body. A local file is a copy, never the plan of record.
 
 ### Planning and design
 
@@ -41,6 +41,8 @@ Skills marked **manual** set `disable-model-invocation: true`. They only run whe
 |---|---|---|
 | [`push-to-gh`](push-to-gh/SKILL.md) | auto | Fixes `.gitignore`, secret-scans, commits, and pushes. Creates the GitHub repo if there is none. |
 | [`pull-from-gh`](pull-from-gh/SKILL.md) | auto | Pulls with rebase + autostash, in the current repo or in each sub-repo you approve. |
+| [`finish-pr`](finish-pr/SKILL.md) | auto | Prepares, checks, squash-merges, and cleans up a GitHub PR in named stages (`prepare` → `check` → `merge` → `cleanup`). Merges only when asked, and deletes only owned branches and worktrees after an observed merge or close. |
+| [`ci-triage`](ci-triage/SKILL.md) | auto | Diagnoses GitHub Actions CI at an exact commit, PR, or run: job status, the failing step and its proven cause, durations, and local parity. Read-only unless a fix or rerun is requested. |
 | [`lock-in-code-review`](lock-in-code-review/SKILL.md) | manual | Very strict maintainability review (abstractions, giant files, condition sprawl) fanned out across parallel reviewers. Rubric in `RUBRIC.md`. |
 | [`improve-architecture`](improve-architecture/SKILL.md) | manual | Scans codebase for deepening refactor opportunities and presents them as an interactive visual HTML report. |
 
@@ -51,6 +53,8 @@ Skills marked **manual** set `disable-model-invocation: true`. They only run whe
 | [`declutter`](declutter/SKILL.md) | manual | Read-only storage report or folder-bucketing plan first, then cleans or moves only what you pick, with an undo log. |
 | [`sway`](sway/SKILL.md) | auto | Edits this machine's Sway/Wayland config (keybindings, monitors, lockscreen, waybar, fuzzel, mako). |
 | [`lab`](lab/SKILL.md) | manual | Takes a college lab from handout to zipped submission, using Colab via colab-mcp for Python. |
+| [`latex-paper`](latex-paper/SKILL.md) | auto | Edits, builds, audits citations in, or converts LaTeX (`.tex`/`.bib`) papers. Runs only the requested branch (EDIT, BUILD, REFERENCES, VENUE) and keeps locked files and the configured bibliography backend unchanged. |
+| [`study-pack`](study-pack/SKILL.md) | auto | Builds a self-contained exam revision pack (HTML by default) from supplied notes and past papers, with traceable source IDs, provenance labels, and no invented marking schemes. |
 | [`llm-cost-audit`](llm-cost-audit/SKILL.md) | auto | Weekly read-only audit of LLM spend (omp and Claude Code) in INR. Prices in `prices.json`, logic in `scripts/audit.py`. |
 | [`token-ledger-update`](token-ledger-update/SKILL.md) | auto | Refreshes the "Token Ledger" Claude artifact from omp and Claude Code usage. |
 | [`teach-me`](teach-me/SKILL.md) | manual | Creates a multi-session learning workspace to teach a new skill or concept with mission and reference materials. |
@@ -75,6 +79,8 @@ omp reads skills from `~/.omp/agent/skills`. Symlink the ones you want:
 ```sh
 ln -s ~/.claude/skills/<name> ~/.omp/agent/skills/<name>
 ```
+
+Invoke an omp skill with `/skill:<name> <arguments>`.
 
 If omp already has its own copy of a skill (some have diverged), check before replacing it.
 

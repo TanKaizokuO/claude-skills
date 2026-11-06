@@ -1,6 +1,6 @@
 ---
 name: setup-repo-skills
-description: Configure this repo for the engineering skills: issue tracker (local markdown by default), triage labels and domain docs layout. Run once per repo before first use of create-spec, spec-to-tickets and triage-issues.
+description: Configure this repo for the engineering skills: issue tracker (GitHub by default), triage labels and domain docs layout. Run once per repo before first use of plan-to-issues and triage-issues.
 disable-model-invocation: true
 ---
 
@@ -25,7 +25,7 @@ Look at the current repo to understand its starting state. Read whatever exists;
 - `CONTEXT.md` and `CONTEXT-MAP.md` at the repo root
 - `docs/adr/` and any `src/*/docs/adr/` directories
 - `docs/agents/` — does this skill's prior output already exist?
-- `.scratch/` — sign that a local-markdown issue tracker convention is already in use
+- `.scratch/` — a sign that a local-markdown tracker is already in use. It does not override GitHub when the repo has a GitHub remote; ask.
 - Is the `triage-issues` skill installed? (a `triage-issues` skill folder alongside this one, or `triage-issues` in your available skills.) This decides whether Section B runs at all.
 - Monorepo signals — a `pnpm-workspace.yaml`, a `workspaces` field in `package.json`, or a populated `packages/*` with its own `src/`. Present only in a genuinely large multi-package repo; their absence means single-context, which is almost every repo.
 
@@ -37,16 +37,18 @@ Lead each section with the recommended answer so the user can accept it in a wor
 
 **Section A — Issue tracker.**
 
-> Explainer: The "issue tracker" is where issues live for this repo. Skills like `spec-to-tickets`, `triage-issues`, `create-spec`, and `qa` read from and write to it — they need to know whether to call `gh issue create`, write a markdown file under `.scratch/`, or follow some other workflow you describe. Pick the place you actually track work for this repo.
+> Explainer: The "issue tracker" is where issues live for this repo. Skills like `plan-to-issues`, `triage-issues`, and `qa` read from and write to it — they need to know whether to call `gh issue create`, write a markdown file under `.scratch/`, or follow some other workflow you describe. Pick the place you actually track work for this repo.
 
-Default posture: **local markdown** (`.scratch/`), whatever the remote is. Propose it first with `AskUserQuestion`, and offer the others:
+Default posture: **GitHub** when a `git remote` points at GitHub. Propose it first with `AskUserQuestion`, and offer the others:
 
-- **GitHub** — issues live in the repo's GitHub Issues (uses the `gh` CLI); suggest it only when a `git remote` points at GitHub and the user already tracks work there
+- **GitHub (recommended)** — issues live in the repo's GitHub Issues (uses the `gh` CLI). Full implementation plans live in the issue body, filed by `plan-to-issues`.
 - **GitLab** — issues live in the repo's GitLab Issues (uses the [`glab`](https://gitlab.com/gitlab-org/cli) CLI)
-- **Local markdown (recommended)** — issues live as files under `.scratch/<feature>/` in this repo
+- **Local markdown** — issues live as files under `.scratch/<feature>/` in this repo. Choose only when the user asks for it.
 - **Other** (Jira, Linear, etc.) — ask the user to describe the workflow in one paragraph; the skill will record it as freeform prose
 
 Record the choice in `docs/agents/issue-tracker.md`. The GitHub and GitLab templates carry a "PRs as a request surface" flag, defaulted **off** — leave it off and don't raise it; a user who wants external PRs in the triage queue can flip the flag in the file later.
+
+With GitHub chosen, write in `docs/agents/issue-tracker.md` that a feature or refactor plan lives in full in its GitHub issue body, filed by `plan-to-issues`. A local file is a copy, never the plan of record.
 
 **Section B — Triage label vocabulary.** Skip this section entirely if the `triage-issues` skill isn't installed (exploration told you) — an uninstalled skill needs no labels.
 

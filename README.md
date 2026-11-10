@@ -14,7 +14,7 @@ Skills marked **manual** set `disable-model-invocation: true`. They only run whe
 | [`plan-to-issues`](plan-to-issues/SKILL.md) | auto | Plans a feature or refactor as GitHub issues, each with a full implementation plan in the body, or files a supplied plan as those issues. Reads the repo's rules and existing issues and PRs first; publishes only after approval. |
 | [`sync-docs`](sync-docs/SKILL.md) | manual | Updates the project's state docs to match current progress, with proof for each change. Leaves the commit to `push-to-gh`. |
 | [`handoff`](handoff/SKILL.md) | manual | Writes a self-contained handoff file to `/tmp` so a fresh session can resume. Run before `/clear`. |
-| [`orchestrate`](orchestrate/SKILL.md) | auto | Runs the session as an orchestrator that delegates to subagents, including Gemini agents through Antigravity CLI (`agy`). |
+| [`orchestrate`](orchestrate/SKILL.md) | auto | Prefers Claude orchestrators → GPT workers (Terra Medium for routine work; Sol High for hard reasoning/review), with Claude quota/harness fallbacks. Gemini is unavailable. |
 | [`which-skill`](which-skill/SKILL.md) | manual | Interactive router that recommends the right skill or flow for your current situation. |
 | [`setup-repo-skills`](setup-repo-skills/SKILL.md) | manual | Scaffolds repository configuration (issue tracker, defaulting to GitHub Issues; triage labels; domain docs layout) for engineering skills. |
 | [`build-and-review`](build-and-review/SKILL.md) | auto | Builds work from a spec, ticket set, or description test-first, reviews the diff, and commits on the working branch. |
@@ -56,7 +56,7 @@ Feature and refactor plans filed by `plan-to-issues` live in full in the GitHub 
 | [`latex-paper`](latex-paper/SKILL.md) | auto | Edits, builds, audits citations in, or converts LaTeX (`.tex`/`.bib`) papers. Runs only the requested branch (EDIT, BUILD, REFERENCES, VENUE) and keeps locked files and the configured bibliography backend unchanged. |
 | [`study-pack`](study-pack/SKILL.md) | auto | Builds a self-contained exam revision pack (HTML by default) from supplied notes and past papers, with traceable source IDs, provenance labels, and no invented marking schemes. |
 | [`llm-cost-audit`](llm-cost-audit/SKILL.md) | auto | Weekly read-only audit of LLM spend (omp and Claude Code) in INR. Prices in `prices.json`, logic in `scripts/audit.py`. |
-| [`suggest-model`](suggest-model/SKILL.md) | auto | Recommends a model using personal intelligence/cost benchmarks and live 5-hour/weekly subscription limits; preserves shared-pool boundaries and flags unknown usage. `startup.ts` is an omp extension that asks for the job at interactive startup and runs this skill. |
+| [`suggest-model`](suggest-model/SKILL.md) | auto | Recommends an orchestrator → worker pair from the fixed routing table and live subscription limits; uses the user-supplied intelligence chart for comparisons and excludes unavailable Gemini. `startup.ts` asks for the job at interactive startup. |
 | [`token-ledger-update`](token-ledger-update/SKILL.md) | auto | Refreshes the "Token Ledger" Claude artifact from omp and Claude Code usage. |
 | [`teach-me`](teach-me/SKILL.md) | manual | Creates a multi-session learning workspace to teach a new skill or concept with mission and reference materials. |
 | [`my-writing-great-skills`](my-writing-great-skills/SKILL.md) | manual | Reference vocabulary and principles for authoring reliable, predictable skills. |

@@ -1,11 +1,11 @@
 ---
-name: profile-readme
-description: Update the TanKaizokuO GitHub profile repo (README featured projects, profile.json card rows, refresh the profile card) and suggest new updates from recent GitHub activity, stack drift, and stale or broken bits. Use for "update my profile README", "update TanKaizokuO", "what should I add to my GitHub profile", or /profile-readme.
+name: update-profile-readme
+description: Update the TanKaizokuO GitHub profile repo (README featured projects, profile.json card rows, refresh the profile card) and suggest new updates from recent GitHub activity, stack drift, and stale or broken bits. Use for "update my profile README", "update TanKaizokuO", "what should I add to my GitHub profile", or /update-profile-readme.
 ---
 
-Keep the GitHub profile repo `TanKaizokuO/TanKaizokuO` current. The skill suggests changes, you pick which ones to keep, and then it applies and pushes them. Typing `/profile-readme` authorizes the commit and push to `main` **only for the changes the user picks** in step 3.
+Keep the GitHub profile repo `TanKaizokuO/TanKaizokuO` current. The skill suggests changes, you pick which ones to keep, and then it applies and pushes them. Typing `/update-profile-readme` authorizes the commit and push to `main` **only for the changes the user picks** in step 3.
 
-Text after `/profile-readme`: `$ARGUMENTS`. A concrete request ("add daypane", "drop Go from languages") skips the menu: apply it in step 4, though the step 2 report is still shown for context.
+Text after `/update-profile-readme`: `$ARGUMENTS`. A concrete request ("add daypane", "drop Go from languages") skips the menu: apply it in step 4, though the step 2 report is still shown for context.
 
 ## Repo facts
 
@@ -27,7 +27,7 @@ cd ~/Code/archive/TanKaizokuO && git fetch --prune && git status -sb
 ## 2. Scan and report
 
 ```bash
-python3 ~/.claude/skills/profile-readme/scan.py ~/Code/archive/TanKaizokuO --days 60
+python3 ~/.claude/skills/update-profile-readme/scan.py ~/Code/archive/TanKaizokuO --days 60
 ```
 
 The script is read-only and prints JSON. Turn it into a short numbered list of suggestions, grouped as follows. Only list items that are real findings.

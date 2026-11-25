@@ -23,3 +23,14 @@ Thumbs.db
 
 # Local backups
 *.bak-*
+
+# Installed AWS skills (third-party)
+/amazon-bedrock/
+/aws-*/
+/launch-with-aws/
+/signing-in-to-aws/
+/setting-up-cloudwatch-observability/
+
+# Per-run local state and backups
+/token-ledger-update/keys.json
+*.v[0-9]*bak

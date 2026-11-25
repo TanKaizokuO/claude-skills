@@ -51,8 +51,8 @@ TIER = {
     "claude-opus-5-5": "premium", "claude-opus-5": "premium", "claude-opus-4-8": "premium",
     "claude-opus-4-7": "premium", "claude-opus-4-6": "premium", "claude-fable-5-1": "premium",
     "claude-sonnet-5-5": "mid", "claude-sonnet-5": "mid", "claude-sonnet-4-6": "mid",
-    "gemini-3.1-pro": "mid", "gpt-6.1-sol": "mid",
-    "claude-haiku-5-5": "cheap", "claude-haiku-4-5": "cheap", "gpt-6-luna": "cheap",
+    "gemini-3.1-pro": "mid", "gpt-6.1-sol": "mid", "gpt-6.2-sol": "mid",
+    "claude-haiku-5-5": "cheap", "claude-haiku-4-5": "cheap", "gpt-6-luna": "cheap", "gpt-6.1-terra": "cheap",
     "gemini-3.5-flash": "cheap", "gemini-3.6-flash": "cheap", "gemini-3.7-flash": "cheap",
     "gemini-3.8-flash": "cheap", "gemini-3.1-flash-lite": "cheap",
 }
@@ -61,6 +61,9 @@ SUPERSESSIONS = [
      "available_utc": "2026-09-22T18:53:00Z"},
     {"new": "claude-sonnet-5-5", "old": ["claude-sonnet-5", "claude-sonnet-4-6"],
      "available_utc": "2026-09-29T17:48:00Z"},
+    # OpenRouter lists 2026-11-17 with no time; end of that day UTC so only clearly-later use counts.
+    {"new": "gpt-6.2-sol", "old": ["gpt-6.1-sol"],
+     "available_utc": "2026-11-17T23:59:59Z"},
 ]
 
 
